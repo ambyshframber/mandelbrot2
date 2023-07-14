@@ -37,7 +37,7 @@ impl Controller {
         Self {
             proxy,
 
-            render_pm: PixelMapper::new_radx(Complex { real: -0.5, imag: 0.0 }, 1.0, 0.0, crate::STARTING_WIDTH, crate::STARTING_HEIGHT),
+            render_pm: PixelMapper::new_radx(Complex { real: -1.0, imag: 0.0 }, 1.0, 1.0, crate::STARTING_WIDTH, crate::STARTING_HEIGHT),
             centre: Complex { real: -0.5, imag: 0.0 },
             radius: 1.0,
             angle: 0.0,
@@ -67,6 +67,7 @@ impl Controller {
                 let _ = self.proxy.send_event(ViewUpdate { pm: vf_pm, wi: vw, hi: vh });
             }
             View(centre, radius, angle) => {
+                //eprintln!("view changed");
                 let pm = PixelMapper::new_radx(centre, radius, angle, self.iw, self.ih);
                 self.render_pm = pm;
                 let vf_pm = pm.scale(self.scale);
