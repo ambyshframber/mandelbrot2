@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+
 pub struct Grid<T> {
     data: Vec<T>,
     width: usize
@@ -29,7 +31,12 @@ impl<T: Copy> Grid<T> {
             .map(|((x, v), y)| (x, y, v))
     }
     /// iterate left-right then top-bottom
-    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.data.iter()
+    pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
+        self.data.iter().copied()
+    }
+}
+impl<T: Send> Grid<T> {
+    pub fn par_iter_rows_mut(&mut self) -> impl ParallelIterator<Item = (usize, &mut [T])> + '_ {
+        self.data.par_chunks_exact_mut(self.width).enumerate()
     }
 }

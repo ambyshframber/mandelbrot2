@@ -38,9 +38,9 @@ impl Controller {
             proxy,
 
             render_pm: PixelMapper::new_radx(Complex { real: -1.0, imag: 0.0 }, 1.0, 1.0, crate::STARTING_WIDTH, crate::STARTING_HEIGHT),
-            centre: Complex { real: -0.5, imag: 0.0 },
+            centre: Complex { real: -1.0, imag: 0.0 },
             radius: 1.0,
-            angle: 0.0,
+            angle: 1.0,
 
             iw: crate::STARTING_WIDTH,
             ih: crate::STARTING_HEIGHT,
@@ -55,8 +55,11 @@ impl Controller {
         use Command::*;
         match c {
             Render(name, max_iter, aa) => self.render(name, max_iter, aa),
+            MtRender(name, max_iter, aa) => self.mt_render(name, max_iter, aa),
             Resolution(x, y, sd) => {
                 let pm = PixelMapper::new_radx(self.centre, self.radius, self.angle, x, y);
+                self.render_pm = pm;
+                self.iw = x; self.ih = y;
                 let scale = 1.0 / sd;
                 self.scale = scale;
                 let vf_pm = pm.scale(scale);
@@ -85,12 +88,38 @@ impl Controller {
 
         let start = Instant::now();
 
-        let (g, h) = mandelbrot::generate_iteration_tables(&self.render_pm, self.iw as usize, self.ih as usize, 100);
+        let (g, h) = mandelbrot::generate_iteration_tables(&self.render_pm, self.iw as usize, self.ih as usize, max_iter as u16);
         println!("tables took {}ms", start.elapsed().as_millis());
         let tables = Instant::now();
         let mut i = RgbImage::new(self.iw, self.ih);
         i.pixels_mut().zip(g.iter()).for_each(|(p, i)| {
-            if let Some(count) = h.get(*i as usize) {
+            if let Some(count) = h.get(i as usize) {
+                let blue = (count * 256.0) as u8;
+                *p = Rgb([0, 0, blue])
+            }
+            else {
+                *p = Rgb([255, 255, 255])
+            }
+        });
+        println!("colouring took {}ms", tables.elapsed().as_millis());
+        if let Err(e) = i.save(name) {
+            println!("failed to save: {}", e)
+        }
+    }
+
+    fn mt_render(&self, name: &str, max_iter: usize, aa: usize) {
+        use std::time::Instant;
+        use crate::mandelbrot;
+        use image::{Rgb, RgbImage};
+
+        let start = Instant::now();
+
+        let (g, h) = mandelbrot::mt_generate_tables(&self.render_pm, self.iw as usize, self.ih as usize, max_iter as u16);
+        println!("tables took {}ms", start.elapsed().as_millis());
+        let tables = Instant::now();
+        let mut i = RgbImage::new(self.iw, self.ih);
+        i.pixels_mut().zip(g.iter()).for_each(|(p, i)| {
+            if let Some(count) = h.get(i as usize) {
                 let blue = (count * 256.0) as u8;
                 *p = Rgb([0, 0, blue])
             }
@@ -113,6 +142,12 @@ fn parse_line(l: &str) -> Option<Command> {
             let max_iter = i.next().map(|v| v.parse().ok()).unwrap_or(Some(100))?;
             let aa = i.next().map(|v| v.parse().ok()).unwrap_or(Some(1))?;
             Command::Render(name, max_iter, aa)   
+        }
+        "mtrender" => {
+            let name = i.next().unwrap_or("output.png");
+            let max_iter = i.next().map(|v| v.parse().ok()).unwrap_or(Some(100))?;
+            let aa = i.next().map(|v| v.parse().ok()).unwrap_or(Some(1))?;
+            Command::MtRender(name, max_iter, aa)   
         }
         "res" => {
             let x = i.next().and_then(|v| v.parse().ok())?;
@@ -143,6 +178,9 @@ enum Command<'a> {
     /// renders the current view to a file
     /// name, max iter, aa
     Render(&'a str, usize, usize),
+    /// renders the current view to a file, using the multithreaded renderer
+    /// name, max iter, aa
+    MtRender(&'a str, usize, usize),
     /// changes the resolution of the target view and viewfinder
     /// the float is scale divisor, ie. how many pixels of render per every pixel of viewfinder
     /// if it's 3, divide the resolution by 3 and send that to the viewfinder

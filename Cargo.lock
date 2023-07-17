@@ -556,6 +556,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "image",
+ "rayon",
  "rustyline",
  "softbuffer",
  "winit",

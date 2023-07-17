@@ -1,6 +1,7 @@
 use crate::utils::*;
 use crate::pixelmapper::PixelMapper;
 use crate::grid::Grid;
+use rayon::prelude::*;
 
 fn iter(z: Complex, c: Complex) -> Complex {
     z.square() + c
@@ -32,20 +33,47 @@ pub fn do_point(c: Complex, max_iter: usize) -> Option<usize> {
     }
     None
 }
-pub fn generate_iteration_tables(pm: &PixelMapper, width: usize, height: usize, max_iter: usize) -> (Grid<u16>, Vec<f32>) {
+
+fn mt_generate_iter_counts(pm: &PixelMapper, width: usize, height: usize, max_iter: u16) -> Grid<u16> {
     let mut g = Grid::new(width, height, 0u16);
-    let mut h = Vec::new(); h.resize(max_iter, 0usize);
+
+    g.par_iter_rows_mut().for_each(|(y, row)| {
+        row.iter_mut().enumerate().for_each(|(x, px)| {
+            *px = do_point(pm.map(x, y), max_iter as usize).map(|i| i as u16).unwrap_or(u16::MAX)
+        })
+    });
+
+    g
+}
+pub fn mt_generate_tables(pm: &PixelMapper, width: usize, height: usize, max_iter: u16) -> (Grid<u16>, Vec<f32>) {
+    let ic = mt_generate_iter_counts(pm, width, height, max_iter);
+    let mut h = Vec::new(); h.resize(max_iter as usize, 0usize);
+    let mut total = 0usize;
+
+    ic.iter().filter(|c| *c < max_iter).for_each(|count| {
+        total += 1;
+        h[count as usize] += 1;
+    });
+
+    let h = accumulate_normalise_iterations(&h, total);
+
+    (ic, h)
+}
+
+pub fn generate_iteration_tables(pm: &PixelMapper, width: usize, height: usize, max_iter: u16) -> (Grid<u16>, Vec<f32>) {
+    let mut g = Grid::new(width, height, 0u16);
+    let mut h = Vec::new(); h.resize(max_iter as usize, 0usize);
     let mut total = 0usize;
 
     for (x, y, v) in g.iter_coords_mut() {
-        match do_point(pm.map(x, y), max_iter) {
+        match do_point(pm.map(x, y), max_iter as usize) {
             Some(i) => {
                 *v = i as u16;
                 h[i] += 1;
                 total += 1
             }
             None => {
-                *v = max_iter as u16
+                *v = u16::MAX
             }
         }
     }
@@ -65,11 +93,11 @@ fn accumulate_normalise_iterations(h: &Vec<usize>, total: usize) -> Vec<f32> {
     v
 }
 
-pub fn draw_into_buffer(pm: &PixelMapper, width: usize, height: usize, buffer: &mut [u32], max_iter: usize) {
+pub fn draw_into_buffer(pm: &PixelMapper, width: usize, height: usize, buffer: &mut [u32], max_iter: u16) {
     let (g, h) = generate_iteration_tables(pm, width, height, max_iter);
 
     g.iter().zip(buffer.iter_mut()).for_each(|(i, p)| {
-        if let Some(cf) = h.get(*i as usize) {
+        if let Some(cf) = h.get(i as usize) {
             let blue = (cf * 256.0) as u8;
             *p = blue as u32;
         }

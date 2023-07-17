@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 clap = "4.3.8"
 image = "0.24.6"
+rayon = "1.7.0"
 rustyline = "12.0.0"
 softbuffer = "0.3.0"
 winit = "0.28.6"
