@@ -97,13 +97,9 @@ pub fn draw_into_buffer(pm: &PixelMapper, width: usize, height: usize, buffer: &
     let (g, h) = generate_iteration_tables(pm, width, height, max_iter);
 
     g.iter().zip(buffer.iter_mut()).for_each(|(i, p)| {
-        if let Some(cf) = h.get(i as usize) {
-            let blue = (cf * 256.0) as u8;
-            *p = blue as u32;
-        }
-        else {
-            *p = 0x00ff_ffff
-        }
+        use image::Rgb;
+        let Rgb([r, g, b]) = h_palette(h.get(i as usize).copied());
+        *p = u32::from_be_bytes([0, r, g, b])
     });
 }
 

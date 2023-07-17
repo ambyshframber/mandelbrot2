@@ -10,6 +10,13 @@ impl<T: Copy> Grid<T> {
         v.resize(width * height, init);
         Grid { data: v, width }
     }
+    pub fn get(&self, x: usize, y: usize) -> T {
+        self.data[x + (y * self.width)]
+    }
+
+    pub fn iter_rows(&self) -> impl Iterator<Item = &[T]> {
+        self.data.chunks_exact(self.width)
+    }
     pub fn iter_coords(&self) -> impl Iterator<Item = (usize, usize, &T)> + '_ {
         self.data
             .chunks_exact(self.width)

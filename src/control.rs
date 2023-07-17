@@ -1,10 +1,26 @@
-use winit::event_loop::EventLoopProxy;
+use winit::event_loop::{EventLoopProxy, EventLoopClosed};
+use image::{Rgb, RgbImage};
+
+use std::time::Instant;
 
 use crate::utils::*;
 use crate::pixelmapper::PixelMapper;
+use crate::mandelbrot;
+
+struct FatProxy(Option<EventLoopProxy<ViewUpdate>>);
+impl FatProxy {
+    fn send_event(&self, event: ViewUpdate) -> Result<(), EventLoopClosed<ViewUpdate>> {
+        if let Some(p) = &self.0 {
+            p.send_event(event)
+        }
+        else {
+            Ok(())
+        }
+    }
+}
 
 struct Controller {
-    proxy: EventLoopProxy<ViewUpdate>,
+    proxy: FatProxy,
 
     render_pm: PixelMapper,
     centre: Complex,
@@ -19,7 +35,8 @@ struct Controller {
     vh: u32,
 }
 
-pub fn control_loop(p: EventLoopProxy<ViewUpdate>) {
+pub fn control_loop(p: Option<EventLoopProxy<ViewUpdate>>) {
+    let p = FatProxy(p);
     let mut controller = Controller::new(p);
     let c = rustyline::config::Config::builder().auto_add_history(true).build();
 
@@ -33,7 +50,7 @@ pub fn control_loop(p: EventLoopProxy<ViewUpdate>) {
 }
 
 impl Controller {
-    fn new(proxy: EventLoopProxy<ViewUpdate>) -> Self {
+    fn new(proxy: FatProxy) -> Self {
         Self {
             proxy,
 
@@ -55,7 +72,6 @@ impl Controller {
         use Command::*;
         match c {
             Render(name, max_iter, aa) => self.render(name, max_iter, aa),
-            MtRender(name, max_iter, aa) => self.mt_render(name, max_iter, aa),
             Resolution(x, y, sd) => {
                 let pm = PixelMapper::new_radx(self.centre, self.radius, self.angle, x, y);
                 self.render_pm = pm;
@@ -82,36 +98,19 @@ impl Controller {
     }
 
     fn render(&self, name: &str, max_iter: usize, aa: usize) {
-        use std::time::Instant;
-        use crate::mandelbrot;
-        use image::{Rgb, RgbImage};
+        let i = if aa <= 1 {
+            self.render_no_aa(max_iter)
+        }
+        else {
+            self.render_aa(max_iter, aa)
+        };
 
-        let start = Instant::now();
-
-        let (g, h) = mandelbrot::generate_iteration_tables(&self.render_pm, self.iw as usize, self.ih as usize, max_iter as u16);
-        println!("tables took {}ms", start.elapsed().as_millis());
-        let tables = Instant::now();
-        let mut i = RgbImage::new(self.iw, self.ih);
-        i.pixels_mut().zip(g.iter()).for_each(|(p, i)| {
-            if let Some(count) = h.get(i as usize) {
-                let blue = (count * 256.0) as u8;
-                *p = Rgb([0, 0, blue])
-            }
-            else {
-                *p = Rgb([255, 255, 255])
-            }
-        });
-        println!("colouring took {}ms", tables.elapsed().as_millis());
         if let Err(e) = i.save(name) {
             println!("failed to save: {}", e)
         }
     }
 
-    fn mt_render(&self, name: &str, max_iter: usize, aa: usize) {
-        use std::time::Instant;
-        use crate::mandelbrot;
-        use image::{Rgb, RgbImage};
-
+    fn render_no_aa(&self, max_iter: usize) -> RgbImage {
         let start = Instant::now();
 
         let (g, h) = mandelbrot::mt_generate_tables(&self.render_pm, self.iw as usize, self.ih as usize, max_iter as u16);
@@ -119,18 +118,34 @@ impl Controller {
         let tables = Instant::now();
         let mut i = RgbImage::new(self.iw, self.ih);
         i.pixels_mut().zip(g.iter()).for_each(|(p, i)| {
-            if let Some(count) = h.get(i as usize) {
-                let blue = (count * 256.0) as u8;
-                *p = Rgb([0, 0, blue])
-            }
-            else {
-                *p = Rgb([255, 255, 255])
-            }
+            *p = h_palette(h.get(i as usize).copied())
         });
         println!("colouring took {}ms", tables.elapsed().as_millis());
-        if let Err(e) = i.save(name) {
-            println!("failed to save: {}", e)
-        }
+        i
+    }
+    fn render_aa(&self, max_iter: usize, aa: usize) -> RgbImage {
+        let start = Instant::now();
+
+        let gw = self.iw as usize * aa;
+        let gh = self.ih as usize * aa;
+        let pm = self.render_pm.scale(aa as f32);
+        let (g, h) = mandelbrot::mt_generate_tables(&pm, gw, gh, max_iter as u16);
+
+        println!("tables took {}ms", start.elapsed().as_millis());
+        let tables = Instant::now();
+
+        let mut buf = crate::grid::Grid::new(aa, aa, Rgb([0u8, 0, 0]));
+        let i = RgbImage::from_fn(self.iw, self.ih, |x, y| {
+            let basex = x as usize * aa;
+            let basey = y as usize * aa;
+            buf.iter_coords_mut().for_each(|(x, y, v)| {
+                let i = g.get(basex + x, basey + y) as usize;
+                *v = h_palette(h.get(i as usize).copied());
+            });
+            average_colour(buf.iter())
+        });
+        println!("colouring took {}ms", tables.elapsed().as_millis());
+        i
     }
 }
 
@@ -142,12 +157,6 @@ fn parse_line(l: &str) -> Option<Command> {
             let max_iter = i.next().map(|v| v.parse().ok()).unwrap_or(Some(100))?;
             let aa = i.next().map(|v| v.parse().ok()).unwrap_or(Some(1))?;
             Command::Render(name, max_iter, aa)   
-        }
-        "mtrender" => {
-            let name = i.next().unwrap_or("output.png");
-            let max_iter = i.next().map(|v| v.parse().ok()).unwrap_or(Some(100))?;
-            let aa = i.next().map(|v| v.parse().ok()).unwrap_or(Some(1))?;
-            Command::MtRender(name, max_iter, aa)   
         }
         "res" => {
             let x = i.next().and_then(|v| v.parse().ok())?;
@@ -178,9 +187,6 @@ enum Command<'a> {
     /// renders the current view to a file
     /// name, max iter, aa
     Render(&'a str, usize, usize),
-    /// renders the current view to a file, using the multithreaded renderer
-    /// name, max iter, aa
-    MtRender(&'a str, usize, usize),
     /// changes the resolution of the target view and viewfinder
     /// the float is scale divisor, ie. how many pixels of render per every pixel of viewfinder
     /// if it's 3, divide the resolution by 3 and send that to the viewfinder

@@ -23,9 +23,14 @@ const STARTING_WINDOW_HEIGHT: u32 = 360;
 const STARTING_WINDOW_SIZE: LogicalSize<u32> = LogicalSize::new(STARTING_WINDOW_WIDTH, STARTING_WINDOW_HEIGHT);
 
 fn main() {
+    if let Some(_) = std::env::args().nth(1) {
+        control::control_loop(None);
+        return
+    }
+
     let event_loop: EventLoop<control::ViewUpdate> = EventLoopBuilder::with_user_event().build();
     let proxy = event_loop.create_proxy();
-    thread::spawn(move || control::control_loop(proxy));
+    thread::spawn(move || control::control_loop(Some(proxy)));
 
     let window = WindowBuilder::new()
         .with_title("fractals!")
