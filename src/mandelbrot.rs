@@ -33,13 +33,52 @@ pub fn do_point(c: Complex, max_iter: usize) -> Option<usize> {
     }
     None
 }
+/// return will be >= max_iter if the point didn't escape
+pub fn do_point_optimised(c: Complex, max_iter: usize) -> usize {
+    // cardioid/bulb checking
+    let p = ((c.real - 0.25).powi(2) + c.imag.powi(2)).sqrt();
+    if c.real <= p - (2.0 * p.powi(2)) + 0.25 {
+        return max_iter
+    }
+    if (c.real + 1.0).powi(2) + c.imag.powi(2) <= 1.0 / 16.0 {
+        return max_iter
+    }
+
+    let mut x = c.real;
+    let mut y = c.imag;
+    let mut x2 = x.powi(2);
+    let mut y2 = y.powi(2);
+
+    let mut oldx = x;
+    let mut oldy = y;
+    
+    for i in 1..max_iter { // technically starts at iteration 1
+        if i % 4 == 0 {
+            (oldx, oldy) = (x, y)
+        }
+
+        y = (x + x) * y + c.imag;
+        x = x2 - y2 + c.real;
+        x2 = x.powi(2);
+        y2 = y.powi(2);
+
+        if float_fuzzy_eq(x, oldx) && float_fuzzy_eq(y, oldy) {
+            return max_iter
+        }
+
+        if x2 + y2 > 4.0 {
+            return i
+        }
+    }
+    return max_iter
+}
 
 fn mt_generate_iter_counts(pm: &PixelMapper, width: usize, height: usize, max_iter: u16) -> Grid<u16> {
     let mut g = Grid::new(width, height, 0u16);
 
     g.par_iter_rows_mut().for_each(|(y, row)| {
         row.iter_mut().enumerate().for_each(|(x, px)| {
-            *px = do_point(pm.map(x, y), max_iter as usize).map(|i| i as u16).unwrap_or(u16::MAX)
+            *px = do_point_optimised(pm.map(x, y), max_iter as usize) as u16
         })
     });
 
